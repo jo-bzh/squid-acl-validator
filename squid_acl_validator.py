@@ -1,22 +1,9 @@
+#!/usr/bin/env python3
 # https://www.visolve.com/squid/squid24s1/access_controls.html
 # Case sensitive ???
 
 # squid -k parse
 # squid -k debug
-
-## No Duplicates - Expandable till unique in all acl files ??
-# No IP or domain duplicates
-# No subdomains duplicates
-# No host or Network IP inside a higher existing Network
-
-## Valid IP
-# Valid IPv4 or v6 Host, Network or range - ip-address/netmask
-
-## Valid Domain
-# valid url (start by .)
-
-## Valid Regex
-# regex
 
 import enum, re, os, logging
 import argparse, pdb
@@ -160,9 +147,17 @@ class SquidACLItem:
     self.line = line.strip().replace('\n', '') # Beautify line
     self.filename = filename
     self.index = index
-    self.acl_item = self.line.split(' #')[0] # Item without comment
+    self.acl_item = self.line.split('#')[0] # Item without comment
+    self.acl_item = self.acl_item.strip() # Remove spaces
     self.report = None
 
+  def is_empty(self) -> bool:
+    """
+    :return: ACL Item is empty equivalence
+    :rtype: bool
+    """
+    return self.acl_item == ""
+  
   def validate(self, other_acl_items:list = []) -> SquidACLItemReport:
     """
     Validate Squid ACL Item intrisic and contextual through given ACL Item list.
@@ -394,8 +389,10 @@ class SquidACLFile:
     with open(file_path, 'r') as f:
       if self.verbosity: logging.debug(f"Reading file {file_path}")
       lines = f.readlines()
-      for idx, line in enumerate(lines): 
-        self.acl_items.append(SquidACLItem(line, idx+1,self.file_path.split("/")[-1]))
+      for idx, line in enumerate(lines):
+        current_acl_item = SquidACLItem(line, idx+1,self.file_path.split("/")[-1])
+        if not current_acl_item.is_empty():
+          self.acl_items.append(current_acl_item)
 
   def validate(self, other_acl_items:list = [])->SquidACLFileReport:
     """
@@ -592,7 +589,7 @@ if __name__ == "__main__":
   parser.add_argument(
     "-f", 
     "--files", 
-    help="Files to test, no directories, you can use * (all files in folder level) or ** (all files in all sublfolders)", 
+    help="Files or directories, you can use * (all files in folder level) or ** (all files in all sublfolders)", 
     required=True,
     nargs='+')
   parser.add_argument(
