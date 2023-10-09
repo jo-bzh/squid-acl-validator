@@ -144,13 +144,39 @@ class SquidACLItem:
     :param filename: ACL Filename
     :type filename: str
     """
-    self.line = line.strip().replace('\n', '') # Beautify line
     self.filename = filename
     self.index = index
-    self.acl_item = self.line.split('#')[0] # Item without comment
-    self.acl_item = self.acl_item.strip() # Remove spaces
+    
+    self.line = line.replace('\n', '')
+    
+    if self.line.strip().startswith('#'): # Full comment line
+      self.acl_item = ""
+      self.acl_comment = self.line
+    else:
+      splitted_line = self.line.split(' #')
+      self.acl_item = splitted_line[0].strip() # Item without comment Remove spaces
+      if len(splitted_line) > 1:
+        self.acl_comment = ''.join(splitted_line[1::]) # Remove spaces
+      else:
+        self.acl_comment = ""
+    
+    self.formated_acl_item = self.acl_item
     self.report = None
 
+  def formated_acl_line(self) -> str:
+    """
+    :return: Format acl_line <acl> # <comment>
+    :rtype: str
+    """
+    formated_line = ""
+    if self.acl_item:
+      formated_line = self.formated_acl_item
+      if self.acl_comment:
+        formated_line += " # "+self.acl_comment.strip()
+    else:
+      formated_line = self.line.strip()
+    return formated_line
+  
   def is_empty(self) -> bool:
     """
     :return: ACL Item is empty equivalence
@@ -190,7 +216,7 @@ class SquidACLItem:
       acl_validation_type = "IP Network"
       try:
         ip_network = ipaddress.ip_network(self.acl_item) # raise ValueFAILURE(f'{address!r} does not appear to be an IPv4 or IPv6 network')
-        message, code = ip_network.__class__, ValidationCode.SUCCESS
+        message, code = type(ip_network), ValidationCode.SUCCESS
       except ValueError as e: 
         message = f"<IPNetworkAddress> {e}"
         code = ValidationCode.FAILURE
@@ -201,7 +227,7 @@ class SquidACLItem:
       acl_validation_type = "IP Host"
       try:
         ip_address = ipaddress.ip_address(self.acl_item) # raise ValueFAILURE("{address!r} does not appear to be an IPv4 or IPv6 address")
-        message, code = ip_address.__class__, ValidationCode.SUCCESS
+        message, code = "Host IP must be in CIDR format", ValidationCode.FAILURE
       except ValueError as e:
         message = f"<IPHostAddress> {e}"
         code = ValidationCode.FAILURE
@@ -251,8 +277,10 @@ class SquidACLItem:
       # Domains overlapping
       elif re.match(REG_URL, self.acl_item) and re.match(REG_URL, other_acl_item.acl_item):
         subdomain_exists = other_acl_item.acl_item.split(self.acl_item)[-1] == ''
+        subdomain = other_acl_item.acl_item.split(self.acl_item)
         # ".mail.google.com".split(".google.com") = [".mail",'']
-        wide_domain_exists = self.acl_item.split(other_acl_item.acl_item) == ''
+        wide_domain_exists = self.acl_item.split(other_acl_item.acl_item)[-1] == ''
+        wide_domain = self.acl_item.split(other_acl_item.acl_item)
         if wide_domain_exists:
           message = f"A larger domain \"{other_acl_item.acl_item}\" has been found in {other_acl_item.acl_filename}:L{other_acl_item.acl_line_number}"
           acl_validation_type, code = "Domain Overlap", ValidationCode.FAILURE
@@ -551,9 +579,11 @@ class SquidACL(object):
         files_list = os.listdir(p)
         if self.verbosity: logging.info(f"{p} found {len(files_list)} files")
         if self.verbosity > 1: logging.debug(f"add_files({files_list})")
-        self.add_files([p+filename for filename in files_list])
-      else:
+        self.add_files([os.path.join(p, filename) for filename in files_list])
+      elif os.path.splitext(p)[1] in (".txt",".ini",".acl",""):
         self.add_file(p)
+      else:
+        if self.verbosity: logging.info(f"skipping file {p}")
   
   def add_file(self, file_path:str):
     """
@@ -582,22 +612,39 @@ class SquidACL(object):
       
     return self.acl_files_report
   
-  # TODO format (to reformat if no errors)
+  # TODO format (to reformat if no errors) https://www.geeksforgeeks.org/compare-two-files-line-by-line-in-python/
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Squid ACL file validator")
-  parser.add_argument(
-    "-f", 
-    "--files", 
-    help="Files or directories, you can use * (all files in folder level) or ** (all files in all sublfolders)", 
-    required=True,
-    nargs='+')
   parser.add_argument(
     "-v",
     "--verbosity",
     action="count",
     default=0,
     help="Increase stdout verbosity")
+  subparsers = parser.add_subparsers(title="actions", dest="parser")
+  
+  parent_parser = argparse.ArgumentParser(add_help=False)
+  parent_parser.add_argument(
+    "-f", 
+    "--files", 
+    help="Files or directories, you can use * (all files in folder level) or ** (all files in all sublfolders)", 
+    required=True,
+    nargs='+')
+  
+  parser_validate = subparsers.add_parser("validate",
+                                          parents=[parent_parser],
+                                          help="Check files")
+  
+  parser_format = subparsers.add_parser("format",
+                                        parents=[parent_parser],
+                                        help="Format files")
+  parser_format.add_argument(
+    "-check",
+    "--dry-run",
+    action="store_true",
+    help="Dry Run mode")
+  
   args = parser.parse_args()
   
   args = vars(args)
